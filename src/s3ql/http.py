@@ -873,6 +873,16 @@ class HTTPConnection:
             and self._h11.their_state is h11.IDLE
         )
 
+    @property
+    def is_expired(self) -> bool:
+        '''True if the server has closed the connection while it was idle.
+
+        An idle HTTP/1.1 connection must not receive data, so a readable socket means
+        the server has sent FIN (or a TLS close_notify). h11 cannot see this until a
+        read is attempted, so `is_idle` stays true.
+        '''
+        return self._stream is not None and bool(self._stream.get_extra_info('is_readable'))
+
     async def __aenter__(self) -> HTTPConnection:
         return self
 
@@ -1019,7 +1029,7 @@ class Pool:
         '''Return an idle conn that is keep-alive-clean, or a fresh one.'''
         while self._idle:
             conn = self._idle.pop()
-            if conn.is_idle:
+            if conn.is_idle and not conn.is_expired:
                 return conn
             await conn.aclose()
 
