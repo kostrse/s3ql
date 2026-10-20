@@ -66,6 +66,7 @@ from .parse_args import (
     QuietFlag,
     StorageUrl,
     init_cachedir,
+    lock_cachepath,
     make_app,
     pick,
     run_app,
@@ -255,6 +256,7 @@ async def mount(
     max_conns = pick(max_connections, authinfo.max_connections)
     cache_dir = pick(cachedir, authinfo.cachedir)
     cachepath = init_cachedir(cache_dir, storage_url)
+    lock_cachepath(cachepath)
 
     threads = pick(max_threads, authinfo.max_threads) or determine_threads(compress_spec)
     AsyncComprencBackend.set_max_threads(threads)

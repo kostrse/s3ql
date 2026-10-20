@@ -10,6 +10,7 @@ This module provides the shared building blocks for S3QL's Typer-based command-l
 
 from __future__ import annotations
 
+import fcntl
 import functools
 import inspect
 import logging
@@ -302,3 +303,24 @@ def init_cachedir(cachedir: str, storage_url: str) -> str:
     cachedir = os.path.abspath(cachedir)
     os.environ['SQLITE_TMPDIR'] = cachedir
     return os.path.join(cachedir, escape(storage_url))
+
+
+def lock_cachepath(cachepath: str) -> None:
+    '''Lock the cached metadata at *cachepath* for the lifetime of this process.
+
+    SQLite's own fcntl() locks on the database are not inherited across the fork in
+    `daemonize` and are dropped whenever any descriptor for the file is closed, so they
+    do not keep other S3QL processes away from a running mount. An flock() lock belongs to
+    the open file description, so it survives both. The descriptor is deliberately never
+    closed. Raises `QuietError` if another process holds the lock.
+    '''
+    fd = os.open(cachepath + '.lock', os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise QuietError(
+            'Cached metadata is in use by another S3QL process '
+            '(e.g. a mount.s3ql that is still shutting down).',
+            exitcode=40,
+        )

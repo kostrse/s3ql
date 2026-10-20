@@ -19,6 +19,8 @@ if __name__ == '__main__':
 
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -34,7 +36,7 @@ from s3ql.authinfo import (
 )
 from s3ql.backends import local, open_raw_backend
 from s3ql.logging import QuietError
-from s3ql.parse_args import _canonicalize_storage_url
+from s3ql.parse_args import _canonicalize_storage_url, lock_cachepath
 
 
 def write_authinfo(tmp_path, text: str) -> str:
@@ -248,3 +250,41 @@ async def test_open_raw_backend_valid(tmp_path):
         assert isinstance(backend, local.AsyncBackend)
     finally:
         await backend.close()
+
+
+# Holds the lock on argv[1] until stdin is closed. With argv[2] == 'fork', the lock is
+# held by a child whose parent has exited, as after `daemonize`.
+_LOCK_HOLDER = """
+import os, sys
+from s3ql.parse_args import lock_cachepath
+lock_cachepath(sys.argv[1])
+if sys.argv[2] == 'fork' and os.fork():
+    os._exit(0)
+print('locked', flush=True)
+sys.stdin.read()
+"""
+
+
+@pytest.mark.parametrize('mode', ('plain', 'fork'))
+def test_lock_cachepath(tmp_path, mode):
+    cachepath = os.path.join(tmp_path, 'fs')
+    with subprocess.Popen(
+        [sys.executable, '-c', _LOCK_HOLDER, cachepath, mode],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as holder:
+        assert holder.stdout is not None and holder.stdin is not None
+        assert holder.stdout.readline() == 'locked\n'
+        if mode == 'fork':
+            assert holder.wait(timeout=10) == 0
+
+        with assert_raises(QuietError) as exc:
+            lock_cachepath(cachepath)
+        assert exc.value.exitcode == 40
+
+        holder.stdin.close()
+        # EOF on stdout means that the lock holder (in fork mode, the child) has exited.
+        assert holder.stdout.read() == ''
+
+    lock_cachepath(cachepath)

@@ -71,6 +71,7 @@ from .parse_args import (
     QuietFlag,
     StorageUrl,
     init_cachedir,
+    lock_cachepath,
     make_app,
     pick,
     run_app,
@@ -1286,6 +1287,7 @@ async def fsck(
 
     authinfo = Authinfo.from_file(pick(authfile, DEFAULT_AUTHFILE), storage_url)
     cachepath = init_cachedir(pick(cachedir, authinfo.cachedir), storage_url)
+    lock_cachepath(cachepath)
 
     # fsck only writes metadata, so size the thread pool from the CPU count alone.
     threads = pick(max_threads, authinfo.max_threads) or determine_threads(None)
